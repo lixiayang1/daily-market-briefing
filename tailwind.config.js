@@ -5,6 +5,11 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        page: "hsl(var(--page) / <alpha-value>)",
+        ink: "hsl(var(--ink) / <alpha-value>)",
+        navy: "hsl(var(--navy) / <alpha-value>)",
+        up: "hsl(var(--up) / <alpha-value>)",
+        down: "hsl(var(--down) / <alpha-value>)",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -27,7 +32,7 @@ module.exports = {
           foreground: "hsl(var(--muted-foreground))",
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
+          DEFAULT: "hsl(var(--accent) / <alpha-value>)",
           foreground: "hsl(var(--accent-foreground))",
         },
         popover: {

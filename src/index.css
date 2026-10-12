@@ -4,96 +4,146 @@
 
 @layer base {
   :root {
+    --page: 220 20% 96%;
+    --ink: 222 47% 11%;
+    --navy: 222 60% 15%;
+    --accent: 217 91% 50%;
+    --up: 2 70% 50%;
+    --down: 152 68% 32%;
     --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 217 91% 45%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 91% 50%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent-hsl: 217 91% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 217 91% 45%;
-    --radius: 0.5rem;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 217 91% 50%;
+    --radius: 0.75rem;
   }
 }
 
-.briefing-content {
-  @apply text-[15px] leading-7 text-foreground;
+@layer utilities {
+  .bg-page {
+    background-color: hsl(var(--page));
+  }
+  .bg-navy {
+    background-color: hsl(var(--navy));
+  }
+  .text-ink {
+    color: hsl(var(--ink));
+  }
+  .text-muted {
+    color: hsl(var(--muted-foreground));
+  }
+  .text-accent {
+    color: hsl(var(--accent));
+  }
+  .bg-accent {
+    background-color: hsl(var(--accent));
+  }
+  .border-border {
+    border-color: hsl(var(--border));
+  }
+  .text-up {
+    color: hsl(var(--up));
+  }
+  .text-down {
+    color: hsl(var(--down));
+  }
+  .bg-up\/10 {
+    background-color: hsl(var(--up) / 0.1);
+  }
+  .bg-accent\/90 {
+    background-color: hsl(var(--accent) / 0.9);
+  }
+  .bg-accent\/\[0\.03\] {
+    background-color: hsl(var(--accent) / 0.03);
+  }
+  .bg-accent\/\[0\.04\] {
+    background-color: hsl(var(--accent) / 0.04);
+  }
+  .bg-accent\/50 {
+    background-color: hsl(var(--accent) / 0.5);
+  }
+  .bg-navy\/\[0\.03\] {
+    background-color: hsl(var(--navy) / 0.03);
+  }
+  .bg-navy\/\[0\.04\] {
+    background-color: hsl(var(--navy) / 0.04);
+  }
+  .bg-ink\/\[0\.04\] {
+    background-color: hsl(var(--ink) / 0.04);
+  }
+  .bg-ink\/\[0\.05\] {
+    background-color: hsl(var(--ink) / 0.05);
+  }
+  .bg-ink\/\[0\.06\] {
+    background-color: hsl(var(--ink) / 0.06);
+  }
+  .text-ink\/70 {
+    color: hsl(var(--ink) / 0.7);
+  }
+  .text-ink\/80 {
+    color: hsl(var(--ink) / 0.8);
+  }
+  .text-ink\/85 {
+    color: hsl(var(--ink) / 0.85);
+  }
+  .text-ink\/90 {
+    color: hsl(var(--ink) / 0.9);
+  }
+  .border-border\/60 {
+    border-color: hsl(var(--border) / 0.6);
+  }
 }
 
-.briefing-content h1 {
-  @apply text-2xl font-bold mt-2 mb-3 tracking-tight;
+::selection {
+  background: hsl(var(--accent) / 0.15);
 }
 
-.briefing-content h2 {
-  @apply text-lg font-semibold mt-8 mb-3 pb-2 border-b border-border;
+/* 表格细节 */
+.md-table table tbody tr:hover td {
+  background-color: hsl(var(--accent) / 0.03);
+}
+.md-table table tbody tr:last-child td {
+  border-bottom-width: 0;
 }
 
-.briefing-content h3 {
-  @apply text-base font-semibold mt-6 mb-2;
+/* 手机端微调 */
+@media (max-width: 640px) {
+  .md-table {
+    margin-left: -4px;
+    margin-right: -4px;
+    border-radius: 0.65rem;
+  }
+  .md-table table {
+    font-size: 12.5px;
+  }
+  .md-table th,
+  .md-table td {
+    padding: 8px 10px;
+  }
 }
 
-.briefing-content p {
-  @apply my-3;
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-
-.briefing-content strong {
-  @apply font-semibold text-foreground;
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--ink) / 0.15);
+  border-radius: 4px;
 }
-
-.briefing-content hr {
-  @apply my-6 border-border;
-}
-
-.briefing-content ul,
-.briefing-content ol {
-  @apply my-3 pl-6 space-y-1;
-}
-
-.briefing-content ul {
-  @apply list-disc;
-}
-
-.briefing-content ol {
-  @apply list-decimal;
-}
-
-.briefing-content blockquote {
-  @apply border-l-4 border-primary/40 pl-4 my-4 text-muted-foreground;
-}
-
-.briefing-content table {
-  @apply w-full text-sm my-4 border-collapse;
-  display: block;
-  overflow-x: auto;
-}
-
-.briefing-content thead th {
-  @apply text-left font-semibold text-muted-foreground bg-muted/60 px-3 py-2 border-b border-border whitespace-nowrap;
-}
-
-.briefing-content tbody td {
-  @apply px-3 py-2 border-b border-border/60 align-top;
-}
-
-.briefing-content tbody tr:last-child td {
-  @apply border-b-0;
-}
-
-.briefing-content tbody tr:hover {
-  @apply bg-muted/30;
-}
-
-.briefing-content code {
-  @apply px-1.5 py-0.5 rounded bg-muted text-[13px] font-mono;
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--ink) / 0.25);
 }
