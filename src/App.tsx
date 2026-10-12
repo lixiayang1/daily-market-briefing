@@ -94,12 +94,12 @@ const mdComponents = {
     <thead className="bg-navy/[0.04] text-ink/70">{children}</thead>
   ),
   th: ({ children }: any) => (
-    <th className="text-left font-semibold px-3.5 py-2.5 border-b border-border whitespace-nowrap text-[13px]">
+    <th className="text-left font-semibold px-3.5 py-2.5 border-b border-border whitespace-nowrap text-[13px] first:sticky first:left-0 first:z-20 first:bg-[#f5f7f9] first:shadow-[inset_-8px_0_8px_-8px_rgba(15,30,61,0.25)]">
       {renderChildren(children)}
     </th>
   ),
   td: ({ children }: any) => (
-    <td className="px-3.5 py-2.5 border-b border-border/60 align-top whitespace-nowrap">
+    <td className="px-3.5 py-2.5 border-b border-border/60 align-top whitespace-nowrap first:sticky first:left-0 first:z-10 first:bg-white first:shadow-[inset_-8px_0_8px_-8px_rgba(15,30,61,0.15)]">
       {renderChildren(children)}
     </td>
   ),
