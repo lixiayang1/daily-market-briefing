@@ -402,15 +402,33 @@ def latest_briefing_date():
     except Exception:
         return None
 
+STATE_FILE = os.path.join(os.environ.get("BRIEF_DIR", "public/briefings"), ".state.json")
+
+def read_state():
+    try:
+        return json.load(open(STATE_FILE))
+    except Exception:
+        return {}
+
+def write_state(m):
+    json.dump({"us": m["SPX"]["date"], "hk": m["HSI"]["date"], "a": m["A500"]["date"],
+               "briefing_date": TODAY_S},
+              open(STATE_FILE, "w"), ensure_ascii=False, indent=2)
+
 def phase_gen():
-    if latest_briefing_date() == TODAY_S and not os.environ.get("FORCE"):
-        print(f"今日简报已存在（{TODAY_S}），跳过生成")
-        return "skip"
-    prev_md = ""
     prev = latest_briefing_date()
+    prev_md = ""
     if prev:
         prev_md = open(f"{BRIEF_DIR}/{prev}.md", encoding="utf-8").read()
     m, src = collect()
+    sig = {"us": m["SPX"]["date"], "hk": m["HSI"]["date"], "a": m["A500"]["date"]}
+    st = read_state()
+    no_new_data = (sig["us"] == st.get("us") and sig["hk"] == st.get("hk")
+                   and sig["a"] == st.get("a"))
+    if (latest_briefing_date() == TODAY_S or no_new_data) and not os.environ.get("FORCE"):
+        print(f"无需更新（简报日期={latest_briefing_date()}，数据口径={sig}），静默跳过")
+        json.dump({"status": "skipped"}, open("/tmp/gen_result.json", "w"))
+        return "skip"
     print(json.dumps({k: {"date": v["date"], "close": round(v["close"], 2),
                           "chg20": round(v["chg20"], 2)} for k, v in m.items()},
                      ensure_ascii=False, indent=1))
@@ -426,6 +444,8 @@ def phase_gen():
     json.dump({"title": f"简报 {TODAY.month}月{TODAY.day}日｜已发布｜标普 {m['SPX']['day']:+.1f}% 恒指 {m['HSI']['day']:+.1f}% A500 {m['A500']['day']:+.1f}%",
                "desp": build_push(m, v)},
               open("/tmp/push_payload.json", "w"), ensure_ascii=False)
+    write_state(m)
+    json.dump({"status": "published"}, open("/tmp/gen_result.json", "w"))
     if os.environ.get("DRY_RUN"):
         print("DRY_RUN：不提交不推送")
         return "dry"
@@ -436,6 +456,20 @@ def phase_gen():
     return "ok"
 
 def phase_notify():
+    try:
+        gen_status = json.load(open("/tmp/gen_result.json")).get("status")
+    except Exception:
+        gen_status = "unknown"
+    if gen_status == "skipped":
+        # 静默休息日：只做健康检查，网站异常才提醒
+        try:
+            http_get(SITE + "/")
+            http_get(f"{SITE}/briefings/index.json")
+            print("休息日静默跳过，网站健康检查通过")
+        except Exception as e:
+            server_chan(f"简报 {TODAY.month}月{TODAY.day}日｜异常",
+                        f"网站健康检查失败：{e!r}\n\n{SITE}")
+        return
     ok = False
     for i in range(3):
         try:
