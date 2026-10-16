@@ -1,0 +1,68 @@
+name: daily-briefing
+
+on:
+  schedule:
+    - cron: "0 0 * * *"   # 每天 08:00 Asia/Shanghai（00:00 UTC）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-briefing
+  cancel-in-progress: false
+
+env:
+  TZ: Asia/Shanghai
+  SCT_KEYS: ${{ secrets.SCT_KEYS }}
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 安装依赖与中文字体
+        run: |
+          pip install --quiet matplotlib
+          sudo apt-get install -y -qq fonts-noto-cjk >/dev/null
+          npm ci --silent
+
+      - name: 生成简报并提交 main
+        run: python scripts/daily_briefing.py gen
+
+      - name: 构建站点
+        run: npm run build
+
+      - name: 部署 gh-pages（根目录直放构建产物）
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+          git fetch origin gh-pages
+          git checkout gh-pages
+          git rm -r --cached . -q
+          git clean -fdq -e dist -e node_modules
+          printf 'node_modules/\n' > .gitignore
+          cp -R dist/. .
+          touch .nojekyll
+          rm -rf dist
+          git add -A
+          git commit -q -m "deploy $(TZ=Asia/Shanghai date +%F)" || echo "nothing to deploy"
+          git push origin gh-pages
+          git checkout main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 验证并推送微信
+        run: python scripts/daily_briefing.py notify
