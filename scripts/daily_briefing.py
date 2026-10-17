@@ -364,7 +364,7 @@ def make_table_image(m, out_path):
             cell.set_text_props(color=crowd_text.get(txt, "#333"))
         elif c == 1:
             txt = cell.get_text().get_text()
-            cell.set_text_props(color="#1a7f37" if txt.startswith("+") else "#cf222e")
+            cell.set_text_props(color="#cf222e" if txt.startswith("+") else "#1a7f37")  # A股习惯：红涨绿跌
     fig.savefig(out_path, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
