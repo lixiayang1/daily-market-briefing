@@ -94,6 +94,7 @@ def metrics(series):
     last = vals[-1]
     m = {"date": series[-1][0], "close": last,
          "day": (last / vals[-2] - 1) * 100,
+         "chg5": (last / vals[-6] - 1) * 100,
          "chg20": (last / vals[-21] - 1) * 100,
          "ma250": sum(vals[-250:]) / min(250, len(vals))}
     m["dev250"] = (last / m["ma250"] - 1) * 100
@@ -204,10 +205,13 @@ def cn_commentary(m):
         s += "成长与价值暂未明显分化。"
     return s
 
-def nvda_commentary(nv):
-    pos = (f"NVDA {nv['close']:.2f}美元（{pct(nv['day'])}），20日{pct(nv['chg20'])}，"
-           f"MA50{('上方' if nv['dev50'] >= 0 else '下方')}约{abs(nv['dev50']):.0f}%，"
-           f"MA200上方约{nv['dev200']:.0f}%。")
+def nvda_commentary(nv, weekly=False):
+    lead = (f"NVDA {nv['close']:.2f}美元，本周{pct(nv['chg5'])}（20日{pct(nv['chg20'])}），"
+            if weekly else
+            f"NVDA {nv['close']:.2f}美元（{pct(nv['day'])}），20日{pct(nv['chg20'])}，")
+    pos = (lead
+           + f"MA50{('上方' if nv['dev50'] >= 0 else '下方')}约{abs(nv['dev50']):.0f}%，"
+             f"MA200上方约{nv['dev200']:.0f}%。")
     if nv["dev50"] < 0:
         pos += ("股价跌破MA50，短期动能转弱，不抄底；已有仓位可持有，"
                 "更好介入点在财报验证或接近MA200（约%.0f美元）且盈利预期未下修时。" % nv["ma200"])
@@ -217,10 +221,13 @@ def nvda_commentary(nv):
         pos += "股价偏离MA50较多且拥挤度高，不追高，持有为主。"
     return pos
 
-def abnb_commentary(ab):
-    pos = (f"ABNB {ab['close']:.2f}美元（{pct(ab['day'])}），20日{pct(ab['chg20'])}，"
-           f"MA50{('上方' if ab['dev50'] >= 0 else '下方')}约{abs(ab['dev50']):.0f}%，"
-           f"MA200上方约{ab['dev200']:.0f}%。")
+def abnb_commentary(ab, weekly=False):
+    lead = (f"ABNB {ab['close']:.2f}美元，本周{pct(ab['chg5'])}（20日{pct(ab['chg20'])}），"
+            if weekly else
+            f"ABNB {ab['close']:.2f}美元（{pct(ab['day'])}），20日{pct(ab['chg20'])}，")
+    pos = (lead
+           + f"MA50{('上方' if ab['dev50'] >= 0 else '下方')}约{abs(ab['dev50']):.0f}%，"
+             f"MA200上方约{ab['dev200']:.0f}%。")
     if ab["dev50"] >= 0:
         pos += "重新站上MA50是积极信号，但需2–3个交易日确认守住再考虑小仓第一批；财报是下一验证点。"
     elif ab["dev200"] > 10:
@@ -264,59 +271,74 @@ def yearline(mt):
         return f"上方（约+{d:.0f}%）"
     return f"年线下方约{abs(d):.0f}%（均线约{ma:,.0f}）"
 
-def build_md(m, v, src, prev_md):
-    base = {"美": "SPX", "港": "HSI", "A": "A500"}
+def build_md(m, v, src, prev_md, weekly=False):
     d_us, d_hk, d_a = m["SPX"]["date"], m["HSI"]["date"], m["A500"]["date"]
-    lines = [f"# 全球投资市场简报 | {TITLE_DATE}", "",
-             f"**数据截至：** 美股 {int(d_us[5:7])}月{int(d_us[8:10])}日收盘；港股 {int(d_hk[5:7])}月{int(d_hk[8:10])}日收盘；A股 {int(d_a[5:7])}月{int(d_a[8:10])}日收盘。",
+    ck = "chg5" if weekly else "chg20"          # 本周(5交易日) / 20交易日
+    col = "本周" if weekly else "20交易日"
+    if weekly:
+        mon, fri = week_range(m)
+        title = f"# 全球投资市场周报 | {mon.month}月{mon.day}日–{fri.month}月{fri.day}日"
+        sec3, sec3_label = "## 本周重点解读", "本周"
+    else:
+        title = f"# 全球投资市场简报 | {TITLE_DATE}"
+        sec3, sec3_label = "## 今日重点解读", "今日"
+    lines = [title, "",
+             f"**数据截至：** 美股 {int(d_us[5:7])}月{int(d_us[8:10])}日收盘；港股 {int(d_hk[5:7])}月{int(d_hk[8:10])}日收盘；A股 {int(d_a[5:7])}月{int(d_a[8:10])}日收盘。" + ("本周列为最近5个交易日表现。" if weekly else ""),
              "**策略口径：** 面向未来约2个月和中长期配置；\"分批买入\"不是一次性加仓，默认分2–4批。", "",
-             "| 指数 | 20交易日 | 相对强弱 | 估值 | 拥挤度 | 年线位置 |",
+             f"| 指数 | {col} | 相对强弱 | 估值 | 拥挤度 | 年线位置 |",
              "|---|---|---|---|---|---|"]
     for key, name, mkt, rel_label, val, crowd in INDEX_ROWS:
         mt = m[key]
         rel_name = {"美": "S&P", "港": "恒指", "A": "A500"}[mkt]
-        rel = rel_label or f"较{rel_name} {mt['chg20']-m[base_of(mkt)]['chg20']:+.2f}pct"
-        lines.append(f"| {name} | {pct(mt['chg20'])} | {rel} | {val} | {crowd} | {yearline(mt)} |")
+        rel = rel_label or f"较{rel_name} {mt[ck]-m[base_of(mkt)][ck]:+.2f}pct"
+        lines.append(f"| {name} | {pct(mt[ck])} | {rel} | {val} | {crowd} | {yearline(mt)} |")
     nv, ab = m["NVDA"], m["ABNB"]
     lines += ["", "## 个股持续观察", "",
-              "| 个股 | 20交易日 | 相对S&P | 估值 | 拥挤度 | 趋势 |",
+              f"| 个股 | {col} | 相对S&P | 估值 | 拥挤度 | 趋势 |",
               "|---|---|---|---|---|---|",
-              f"| Nvidia (NVDA) | {pct(nv['chg20'])} | {nv['chg20']-m['SPX']['chg20']:+.2f}pct | Fwd PE 约19倍 | 🔴 | MA50{('上方' if nv['dev50']>=0 else '下方')}约{abs(nv['dev50']):.0f}%；MA200上方约{nv['dev200']:.0f}% |",
-              f"| Airbnb (ABNB) | {pct(ab['chg20'])} | {ab['chg20']-m['SPX']['chg20']:+.2f}pct | Fwd PE 约29倍（估算） | 🟢 | MA50{('上方' if ab['dev50']>=0 else '下方')}约{abs(ab['dev50']):.0f}%；MA200上方约{ab['dev200']:.0f}% |",
+              f"| Nvidia (NVDA) | {pct(nv[ck])} | {nv[ck]-m['SPX'][ck]:+.2f}pct | Fwd PE 约19倍 | 🔴 | MA50{('上方' if nv['dev50']>=0 else '下方')}约{abs(nv['dev50']):.0f}%；MA200上方约{nv['dev200']:.0f}% |",
+              f"| Airbnb (ABNB) | {pct(ab[ck])} | {ab[ck]-m['SPX'][ck]:+.2f}pct | Fwd PE 约29倍（估算） | 🟢 | MA50{('上方' if ab['dev50']>=0 else '下方')}约{abs(ab['dev50']):.0f}%；MA200上方约{ab['dev200']:.0f}% |",
               "",
-              f"**NVDA：** {nvda_commentary(nv)}",
+              f"**NVDA：** {nvda_commentary(nv, weekly)}",
               "",
-              f"**ABNB：** {abnb_commentary(ab)}",
-              "", "## 今日重点解读", "",
-              f"**1. 美股：** {us_commentary(m)}",
+              f"**ABNB：** {abnb_commentary(ab, weekly)}",
+              "", f"{sec3}", "",
+              f"**1. 美股：** {(us_weekly if weekly else us_commentary)(m)}",
               "",
-              f"**2. A股与港股：** {cn_commentary(m)}恒指20日{pct(m['HSI']['chg20'])}、恒生科技{pct(m['HSTECH']['chg20'])}，估值分位中等偏低，风险收益比仍优于A股科技方向。",
+              f"**2. A股与港股：** {(cn_weekly if weekly else cn_commentary)(m)}恒指{sec3_label}{pct(m['HSI'][ck])}、恒生科技{pct(m['HSTECH'][ck])}，估值分位中等偏低，风险收益比仍优于A股科技方向。",
               "",
               f"**3. 拥挤度与信用：** Shiller CAPE约{v['cape'][0]}倍（{v['cape'][1]}{'' if v['cape'][2] else '，未刷新'}）、高收益债OAS约{v['oas'][0]}%（{v['oas'][1]}{'' if v['oas'][2] else '，未刷新'}）、Fear & Greed {v['fng'][0]}（{v['fng'][1]}，未刷新）。利差走阔意味着信用端开始定价风险，组合层面保持防御权重。",
               "",
               f"**组合动作：** {portfolio_action(m)}",
               "", "---", "",
-              f"**注：** 本版MA250均用K线实算（数据源：{('、'.join(sorted(set(src.values()))))}；本简报由云端定时任务自动生成）。估值数据日期：S&P 500远期PE约{v['fwdpe'][0]}倍（FactSet，{v['fwdpe'][1]}{'' if v['fwdpe'][2] else '，未刷新'}）、Shiller CAPE约{v['cape'][0]}倍（multpl，{v['cape'][1]}{'' if v['cape'][2] else '，未刷新'}）、Fear & Greed {v['fng'][0]}（CNN，{v['fng'][1]}，未刷新）、高收益债OAS约{v['oas'][0]}%（FRED/ICE BofA，{v['oas'][1]}{'' if v['oas'][2] else '，未刷新'}）；A股/港股指数PE及历史分位为既有口径，未逐一刷新。ABNB远期PE为估算值。以上为市场分析，不构成投资建议。"]
+              f"**注：** 本版MA250均用K线实算（数据源：{('、'.join(sorted(set(src.values()))))}；本{'周报' if weekly else '简报'}由云端定时任务自动生成）。估值数据日期：S&P 500远期PE约{v['fwdpe'][0]}倍（FactSet，{v['fwdpe'][1]}{'' if v['fwdpe'][2] else '，未刷新'}）、Shiller CAPE约{v['cape'][0]}倍（multpl，{v['cape'][1]}{'' if v['cape'][2] else '，未刷新'}）、Fear & Greed {v['fng'][0]}（CNN，{v['fng'][1]}，未刷新）、高收益债OAS约{v['oas'][0]}%（FRED/ICE BofA，{v['oas'][1]}{'' if v['oas'][2] else '，未刷新'}）；A股/港股指数PE及历史分位为既有口径，未逐一刷新。ABNB远期PE为估算值。以上为市场分析，不构成投资建议。"]
     return "\n".join(lines) + "\n"
 
-def build_push(m, v):
+def build_push(m, v, weekly=False):
     """Server酱 图文版 desp（移动排版，禁用 Markdown 表格）。"""
     nv, ab = m["NVDA"], m["ABNB"]
     d_us, d_hk, d_a = m["SPX"]["date"], m["HSI"]["date"], m["A500"]["date"]
+    if weekly:
+        mon, fri = week_range(m)
+        title_line = f"**全球投资市场周报 | {mon.month}月{mon.day}日–{fri.month}月{fri.day}日**"
+        focus_label = "**▍本周重点**"
+    else:
+        title_line = f"**全球投资市场简报 | {TITLE_DATE}**"
+        focus_label = "**▍今日重点**"
     return "\n\n".join([
-        f"**全球投资市场简报 | {TITLE_DATE}**",
+        title_line,
         f"### 📂 [点这里 → 网站归档与历史简报]({SITE}/)",
-        f"数据截至：美股 {int(d_us[5:7])}月{int(d_us[8:10])}日收盘；港股 {int(d_hk[5:7])}月{int(d_hk[8:10])}日收盘；A股 {int(d_a[5:7])}月{int(d_a[8:10])}日收盘",
+        f"数据截至：美股 {int(d_us[5:7])}月{int(d_us[8:10])}日收盘；港股 {int(d_hk[5:7])}月{int(d_hk[8:10])}日收盘；A股 {int(d_a[5:7])}月{int(d_a[8:10])}日收盘" + ("；本周=最近5个交易日" if weekly else ""),
         f"![指数总表]({SITE}/briefings/img/{TODAY_S}-table.png)",
-        "**▍个股观察**\n\n" + nvda_commentary(nv) + "\n\n" + abnb_commentary(ab),
-        "**▍今日重点**\n\n1. " + us_commentary(m) + "\n\n2. " + cn_commentary(m),
+        "**▍个股观察**\n\n" + nvda_commentary(nv, weekly) + "\n\n" + abnb_commentary(ab, weekly),
+        focus_label + "\n\n1. " + (us_weekly if weekly else us_commentary)(m) + "\n\n2. " + (cn_weekly if weekly else cn_commentary)(m),
         "**▍组合动作**\n\n" + portfolio_action(m),
         "以上为市场分析，不构成投资建议。",
     ])
 
 # ---------- 表格图片 ----------
 
-def make_table_image(m, out_path):
+def make_table_image(m, out_path, weekly=False):
     import matplotlib
     matplotlib.use("Agg")
     from matplotlib import font_manager, pyplot as plt
@@ -330,24 +352,33 @@ def make_table_image(m, out_path):
             except Exception:
                 pass
     plt.rcParams["font.family"] = ["Noto Sans CJK SC", "Noto Sans SC", "sans-serif"]
-    cols = ["指数", "20交易日", "相对强弱", "年线位置", "拥挤度"]
+    ck = "chg5" if weekly else "chg20"
+    cols = ["指数", "本周" if weekly else "20交易日", "相对强弱", "年线位置", "拥挤度"]
     crowd_map = {"🟡": "中", "🟢": "低", "🔴": "高"}
     rows = []
     for key, name, mkt, rel_label, _, crowd in INDEX_ROWS:
         mt = m[key]
         rel_name = {"美": "S&P", "港": "恒指", "A": "A500"}[mkt]
-        rel = rel_label or f"较{rel_name} {mt['chg20']-m[base_of(mkt)]['chg20']:+.2f}pct"
+        rel = rel_label or f"较{rel_name} {mt[ck]-m[base_of(mkt)][ck]:+.2f}pct"
         yl = yearline(mt).replace("（均线约", "\n（均线约")
-        rows.append([f"{mkt}·{name}", pct(mt["chg20"]), rel, yl, crowd_map[crowd]])
+        rows.append([f"{mkt}·{name}", pct(mt[ck]), rel, yl, crowd_map[crowd]])
     crowd_color = {"低": "#dafbe1", "中": "#fff8c5", "高": "#ffebe9"}
     crowd_text = {"低": "#1a7f37", "中": "#9a6700", "高": "#cf222e"}
-    fig, ax = plt.subplots(figsize=(11, 0.42 * len(rows) + 0.9), dpi=160)
+    # 周报换一种底色以便和日报区分：米白底 + 米色表头
+    fig_bg, header_bg = ("#fffdf5", "#efe3c8") if weekly else ("white", "#f2f2f2")
+    if weekly:
+        mon, fri = week_range(m)
+        img_title = f"全球投资市场周报 · 指数总表（{mon.month}月{mon.day}日–{fri.month}月{fri.day}日）"
+        footer_note = "本周=最近5个交易日涨跌幅；相对强弱为与各市场基准本周涨跌幅之差；年线为250日均线实算。"
+    else:
+        img_title = f"全球投资市场简报 · 指数总表（{TODAY_S}）"
+        footer_note = "相对强弱为与各市场基准20日涨跌幅之差；年线为250日均线实算。"
+    fig, ax = plt.subplots(figsize=(11, 0.42 * len(rows) + 0.9), dpi=160, facecolor=fig_bg)
     ax.axis("off")
-    fig.text(0.03, 0.97, f"全球投资市场简报 · 指数总表（{TODAY_S}）",
-             fontsize=15, fontweight="bold", va="top")
+    fig.text(0.03, 0.97, img_title, fontsize=15, fontweight="bold", va="top")
     d_us, d_hk, d_a = m["SPX"]["date"], m["HSI"]["date"], m["A500"]["date"]
     fig.text(0.03, 0.012,
-             f"数据截至：美股 {d_us} / 港股 {d_hk} / A股 {d_a} 收盘；相对强弱为与各市场基准20日涨跌幅之差；年线为250日均线实算。",
+             f"数据截至：美股 {d_us} / 港股 {d_hk} / A股 {d_a} 收盘；{footer_note}",
              fontsize=8.5, color="#666", va="bottom")
     table = ax.table(cellText=rows, colLabels=cols, loc="upper center", cellLoc="center")
     table.auto_set_font_size(False)
@@ -356,7 +387,7 @@ def make_table_image(m, out_path):
     for (r, c), cell in table.get_celld().items():
         cell.set_edgecolor("#ddd")
         if r == 0:
-            cell.set_facecolor("#f2f2f2")
+            cell.set_facecolor(header_bg)
             cell.set_text_props(fontweight="bold")
         elif c == 4:
             txt = cell.get_text().get_text()
@@ -365,11 +396,51 @@ def make_table_image(m, out_path):
         elif c == 1:
             txt = cell.get_text().get_text()
             cell.set_text_props(color="#cf222e" if txt.startswith("+") else "#1a7f37")  # A股习惯：红涨绿跌
-    fig.savefig(out_path, bbox_inches="tight", facecolor="white")
+    fig.savefig(out_path, bbox_inches="tight", facecolor=fig_bg)
     plt.close(fig)
 
 def base_of(mkt):
     return {"美": "SPX", "港": "HSI", "A": "A500"}[mkt]
+
+def week_range(m):
+    """本周区间：以三个市场最新交易日（一般为周五）所在周的周一为起点。"""
+    fri = max(datetime.strptime(m[k]["date"], "%Y-%m-%d").date() for k in ("SPX", "HSI", "A500"))
+    return fri - timedelta(days=fri.weekday()), fri
+
+def us_weekly(m):
+    spx, dji, ndx = m["SPX"], m["DJI"], m["NDX"]
+    s = (f"本周美股：标普500全周{pct(spx['chg5'])}，道指{pct(dji['chg5'])}，"
+         f"Nasdaq-100{pct(ndx['chg5'])}。")
+    if ndx["chg5"] - dji["chg5"] > 1.5:
+        s += "科技股明显强于蓝筹，成长风格占优。"
+    elif dji["chg5"] - ndx["chg5"] > 1.5:
+        s += "蓝筹跑赢科技，资金从拥挤的AI交易向价值与防御轮动。"
+    else:
+        s += "三大指数方向基本一致。"
+    if spx["dev250"] > 8:
+        s += f"标普仍处年线上方约{spx['dev250']:.0f}%的高位区，估值容错空间小，维持“持有不追”。"
+    elif spx["dev250"] < 0:
+        s += "标普已跌破年线，趋势转弱，控制风险敞口为先。"
+    else:
+        s += "标普位于年线附近，方向待确认，维持既有仓位不追高。"
+    return s
+
+def cn_weekly(m):
+    a, cx, cons = m["A500"], m["CHINEXT"], m["CONS50"]
+    s = (f"本周A股：中证A500全周{pct(a['chg5'])}，创业板指{pct(cx['chg5'])}，"
+         f"中证消费50{pct(cons['chg5'])}。")
+    rel = cons["chg5"] - a["chg5"]
+    if rel > 2:
+        s += f"消费50本周跑赢A500约{rel:.1f}pct，防御属性继续兑现；"
+    elif rel < -2:
+        s += f"消费50本周跑输A500约{abs(rel):.1f}pct，防御资金暂时撤离；"
+    if cx["chg5"] < -5:
+        s += "创业板周线大幅走弱，科技成长仍在寻底，接飞刀为时过早，等连续缩量企稳信号。"
+    elif cx["chg5"] > 3:
+        s += "成长方向明显反弹，但单周反弹不等于趋势反转，确认企稳再动。"
+    else:
+        s += "成长与价值暂未明显分化。"
+    return s
 
 # ---------- git / 推送 ----------
 
@@ -416,6 +487,7 @@ def write_state(m):
               open(STATE_FILE, "w"), ensure_ascii=False, indent=2)
 
 def phase_gen():
+    weekly = (TODAY.weekday() == 6)  # 周日：出本周周报（周五收盘数据周六已齐，周日无新数据）
     prev = latest_briefing_date()
     prev_md = ""
     if prev:
@@ -425,7 +497,12 @@ def phase_gen():
     st = read_state()
     no_new_data = (sig["us"] == st.get("us") and sig["hk"] == st.get("hk")
                    and sig["a"] == st.get("a"))
-    if (latest_briefing_date() == TODAY_S or no_new_data) and not os.environ.get("FORCE"):
+    if weekly:
+        if latest_briefing_date() == TODAY_S and not os.environ.get("FORCE"):
+            print(f"本周周报已发布（{TODAY_S}），静默跳过")
+            json.dump({"status": "skipped"}, open("/tmp/gen_result.json", "w"))
+            return "skip"
+    elif (latest_briefing_date() == TODAY_S or no_new_data) and not os.environ.get("FORCE"):
         print(f"无需更新（简报日期={latest_briefing_date()}，数据口径={sig}），静默跳过")
         json.dump({"status": "skipped"}, open("/tmp/gen_result.json", "w"))
         return "skip"
@@ -433,16 +510,26 @@ def phase_gen():
                           "chg20": round(v["chg20"], 2)} for k, v in m.items()},
                      ensure_ascii=False, indent=1))
     v = refresh_valuations(prev_md)
-    md = build_md(m, v, src, prev_md)
+    md = build_md(m, v, src, prev_md, weekly=weekly)
     open(f"{BRIEF_DIR}/{TODAY_S}.md", "w", encoding="utf-8").write(md)
     os.makedirs(f"{BRIEF_DIR}/img", exist_ok=True)
-    make_table_image(m, f"{BRIEF_DIR}/img/{TODAY_S}-table.png")
+    make_table_image(m, f"{BRIEF_DIR}/img/{TODAY_S}-table.png", weekly=weekly)
+    if weekly:
+        mon, fri = week_range(m)
+        doc_title = f"全球投资市场周报 | {mon.month}月{mon.day}日–{fri.month}月{fri.day}日"
+        push_title = (f"周报 {mon.month}/{mon.day}–{fri.month}/{fri.day}｜已发布｜标普 {m['SPX']['chg5']:+.1f}% "
+                      f"恒指 {m['HSI']['chg5']:+.1f}% A500 {m['A500']['chg5']:+.1f}%")
+        commit_msg = f"weekly {TODAY_S}"
+    else:
+        doc_title = f"全球投资市场简报 | {TITLE_DATE}"
+        push_title = (f"简报 {TODAY.month}月{TODAY.day}日｜已发布｜标普 {m['SPX']['day']:+.1f}% "
+                      f"恒指 {m['HSI']['day']:+.1f}% A500 {m['A500']['day']:+.1f}%")
+        commit_msg = f"briefing {TODAY_S}"
     idx = json.load(open(f"{BRIEF_DIR}/index.json"))
-    idx["briefings"].insert(0, {"date": TODAY_S, "title": f"全球投资市场简报 | {TITLE_DATE}"})
+    idx["briefings"].insert(0, {"date": TODAY_S, "title": doc_title})
     json.dump(idx, open(f"{BRIEF_DIR}/index.json", "w"), ensure_ascii=False, indent=2)
     # 推送内容存文件供 notify 阶段使用
-    json.dump({"title": f"简报 {TODAY.month}月{TODAY.day}日｜已发布｜标普 {m['SPX']['day']:+.1f}% 恒指 {m['HSI']['day']:+.1f}% A500 {m['A500']['day']:+.1f}%",
-               "desp": build_push(m, v)},
+    json.dump({"title": push_title, "desp": build_push(m, v, weekly)},
               open("/tmp/push_payload.json", "w"), ensure_ascii=False)
     write_state(m)
     json.dump({"status": "published"}, open("/tmp/gen_result.json", "w"))
@@ -451,7 +538,7 @@ def phase_gen():
         return "dry"
     git("add", BRIEF_DIR)
     git("-c", "user.name=github-actions", "-c", "user.email=actions@github.com",
-        "commit", "-m", f"briefing {TODAY_S}")
+        "commit", "-m", commit_msg)
     git("push", "origin", "main")
     return "ok"
 
