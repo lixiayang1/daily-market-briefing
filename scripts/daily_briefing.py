@@ -492,7 +492,18 @@ def phase_gen():
     prev_md = ""
     if prev:
         prev_md = open(f"{BRIEF_DIR}/{prev}.md", encoding="utf-8").read()
-    m, src = collect()
+    m = src = None
+    last_err = None
+    for attempt in range(3):  # 数据源偶发返回非JSON/空数据：整轮采集最多重试3次
+        try:
+            m, src = collect()
+            break
+        except Exception as e:
+            last_err = e
+            print(f"collect attempt{attempt} failed: {e!r}")
+            time.sleep(45)
+    if m is None:
+        raise last_err
     sig = {"us": m["SPX"]["date"], "hk": m["HSI"]["date"], "a": m["A500"]["date"]}
     st = read_state()
     no_new_data = (sig["us"] == st.get("us") and sig["hk"] == st.get("hk")
