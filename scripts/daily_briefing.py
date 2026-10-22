@@ -57,6 +57,16 @@ def fetch_yahoo(sym, days=1100):
             out[datetime.fromtimestamp(t + off, timezone.utc).date().isoformat()] = c
     return sorted(out.items())
 
+def fetch_tencent_us_index(code, n=640):
+    """腾讯美股指数（标普500/道指/纳指100）历史K线，Yahoo 被封时备用。"""
+    d = json.loads(http_get(
+        f"https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get?param={code},day,,,{n},qfq"))
+    node = d["data"][code]
+    rows = node.get("qfqday") or node.get("day")
+    if not rows:
+        raise RuntimeError(f"empty tencent us-index series: {code}")
+    return [(r[0], float(r[2])) for r in rows]
+
 def fetch_tencent(code, n=600):
     d = json.loads(http_get(
         f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={code},day,,,{n},qfq"))
@@ -110,7 +120,12 @@ def collect():
               "HSI": "港", "HSTECH": "港", "A500": "A", "CSI500": "A",
               "STAR50": "A", "CHINEXT": "A", "CONS50": "A"}
     for k, s in {"SPX": "^GSPC", "DJI": "^DJI", "NDX": "^NDX"}.items():
-        m[k] = metrics(drop_intraday(fetch_yahoo(s), mkt_of[k])); src[k] = "Yahoo Finance"
+        try:
+            m[k] = metrics(drop_intraday(fetch_yahoo(s), mkt_of[k])); src[k] = "Yahoo Finance"
+        except Exception as e:
+            print(f"yahoo {k} failed: {e!r}，改用腾讯美股指数")
+            tc = {"SPX": "usINX", "DJI": "usDJI", "NDX": "usNDX"}[k]
+            m[k] = metrics(drop_intraday(fetch_tencent_us_index(tc), mkt_of[k])); src[k] = "腾讯行情"
     for k, c in {"NVDA": "usNVDA.OQ", "ABNB": "usABNB.OQ", "HSI": "hkHSI",
                  "HSTECH": "hkHSTECH", "A500": "sh000510", "CSI500": "sh000905",
                  "STAR50": "sh000688", "CHINEXT": "sz399006"}.items():
