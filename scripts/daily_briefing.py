@@ -23,11 +23,14 @@ UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
 
 # ---------- 数据抓取 ----------
 
-def http_get(url, timeout=25, retries=3):
+def http_get(url, timeout=25, retries=3, extra_headers=None):
     last = None
+    headers = dict(UA)
+    if extra_headers:
+        headers.update(extra_headers)
     for i in range(retries):
         try:
-            req = urllib.request.Request(url, headers=UA)
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read().decode("utf-8-sig", "replace")
         except Exception as e:
@@ -84,7 +87,8 @@ def fetch_eastmoney(secid, years=3):
         try:
             d = json.loads(http_get(
                 f"https://{host}/api/qt/stock/kline/get?secid={secid}"
-                f"&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=0&beg={beg}&end=20500101"))
+                f"&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=0&beg={beg}&end=20500101"
+                f"&ut=fa5fd1943c7b386f172d6893dbfba10b"))
             rows = (d.get("data") or {}).get("klines") or []
             if rows:
                 return [(r.split(",")[0], float(r.split(",")[1])) for r in rows]
@@ -92,6 +96,32 @@ def fetch_eastmoney(secid, years=3):
         except Exception as e:
             last = e
     raise last
+
+def _parse_jsonp(body):
+    """解析 sina jsonp：var _x=([...]); 或 var _x=(null);"""
+    mt = re.search(r"=\((.*)\)\s*;?\s*$", body, re.S)
+    if not mt:
+        raise RuntimeError("unexpected sina jsonp body")
+    inner = mt.group(1).strip()
+    if inner == "null":
+        raise RuntimeError("sina returned null series")
+    return json.loads(inner)
+
+def fetch_sina_us(sym):
+    """新浪美股日线（K线实算用）：.inx/.dji/.ndx/nvda/abnb。Yahoo/腾讯失效时的第三来源。"""
+    body = http_get(
+        "https://stock.finance.sina.com.cn/usstock/api/jsonp.php/var%20_x=/"
+        f"US_MinKService.getDailyK?symbol={sym}",
+        extra_headers={"Referer": "https://finance.sina.com.cn"})
+    return [(r["d"], float(r["c"])) for r in _parse_jsonp(body)]
+
+def fetch_sina_cn(sym):
+    """新浪 A 股指数日线：sh000510/sh000905/sh000688/sz399006 等（不含 931139）。"""
+    body = http_get(
+        "https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_x=/CN_MarketDataService.getKLineData"
+        f"?symbol={sym}&scale=240&ma=no&datalen=600",
+        extra_headers={"Referer": "https://finance.sina.com.cn"})
+    return [(r["day"], float(r["close"])) for r in _parse_jsonp(body)]
 
 def drop_intraday(series, mkt):
     """港股/A股在盘中会返回当日未完成K线：15:00(CST)收盘前的当日 bar 一律剔除。"""
@@ -113,39 +143,74 @@ def metrics(series):
         m[f"dev{n}"] = (last / m[f"ma{n}"] - 1) * 100
     return m
 
+def try_sources(key, sources):
+    """按序尝试多个数据源，全部失败时抛出带完整原因的错误。"""
+    errs = []
+    for label, fn in sources:
+        try:
+            series = fn()
+            if not series:
+                raise RuntimeError("empty series")
+            return series, label
+        except Exception as e:
+            errs.append(f"{label}: {e!r}")
+            print(f"  {key} ← {label} 失败: {e!r}", flush=True)
+        time.sleep(0.6)
+    raise RuntimeError(f"{key} 全部数据源失败: " + " | ".join(errs))
+
 def collect():
     src = {}
     m = {}
     mkt_of = {"SPX": "美", "DJI": "美", "NDX": "美", "NVDA": "美", "ABNB": "美",
               "HSI": "港", "HSTECH": "港", "A500": "A", "CSI500": "A",
               "STAR50": "A", "CHINEXT": "A", "CONS50": "A"}
-    for k, s in {"SPX": "^GSPC", "DJI": "^DJI", "NDX": "^NDX"}.items():
-        try:
-            m[k] = metrics(drop_intraday(fetch_yahoo(s), mkt_of[k])); src[k] = "Yahoo Finance"
-        except Exception as e:
-            print(f"yahoo {k} failed: {e!r}，改用腾讯美股指数")
-            tc = {"SPX": "usINX", "DJI": "usDJI", "NDX": "usNDX"}[k]
-            m[k] = metrics(drop_intraday(fetch_tencent_us_index(tc), mkt_of[k])); src[k] = "腾讯行情"
-    for k, c in {"NVDA": "usNVDA.OQ", "ABNB": "usABNB.OQ", "HSI": "hkHSI",
-                 "HSTECH": "hkHSTECH", "A500": "sh000510", "CSI500": "sh000905",
-                 "STAR50": "sh000688", "CHINEXT": "sz399006"}.items():
-        try:
-            m[k] = metrics(drop_intraday(fetch_tencent(c), mkt_of[k])); src[k] = "腾讯行情"
-        except Exception as e:
-            print(f"tencent {k} failed: {e!r}")
-    em_backup = {"A500": "1.000510", "CSI500": "1.000905", "STAR50": "1.000688",
-                 "CHINEXT": "0.399006"}
-    for k, secid in em_backup.items():  # 腾讯缺失的 A 股指数用东财补齐
-        if k not in m:
-            m[k] = metrics(drop_intraday(fetch_eastmoney(secid), "A")); src[k] = "东方财富"
-    try:
-        m["CONS50"] = metrics(drop_intraday(fetch_tencent("sh931139"), "A")); src["CONS50"] = "腾讯行情"
-    except Exception:
-        m["CONS50"] = metrics(drop_intraday(fetch_eastmoney("2.931139"), "A")); src["CONS50"] = "东方财富"
+    us_idx = {"SPX": ("^GSPC", "usINX", ".inx"), "DJI": ("^DJI", "usDJI", ".dji"),
+              "NDX": ("^NDX", "usNDX", ".ndx")}
+    for k, (y_sym, tc_sym, sina_sym) in us_idx.items():
+        print(f"[collect] {k} ...", flush=True)
+        series, label = try_sources(k, [
+            ("Yahoo", lambda y=y_sym: fetch_yahoo(y)),
+            ("腾讯", lambda t=tc_sym: fetch_tencent_us_index(t)),
+            ("新浪美股", lambda s=sina_sym: fetch_sina_us(s)),
+        ])
+        m[k] = metrics(drop_intraday(series, mkt_of[k])); src[k] = label
+    stocks = {"NVDA": "usNVDA.OQ", "ABNB": "usABNB.OQ"}
+    sina_stock = {"NVDA": "nvda", "ABNB": "abnb"}
+    for k, tc_sym in stocks.items():
+        print(f"[collect] {k} ...", flush=True)
+        series, label = try_sources(k, [
+            ("腾讯", lambda t=tc_sym: fetch_tencent(t)),
+            ("新浪美股", lambda s=sina_stock[k]: fetch_sina_us(s)),
+        ])
+        m[k] = metrics(drop_intraday(series, mkt_of[k])); src[k] = label
+    hk = {"HSI": "hkHSI", "HSTECH": "hkHSTECH"}
+    for k, tc_sym in hk.items():
+        print(f"[collect] {k} ...", flush=True)
+        series, label = try_sources(k, [("腾讯", lambda t=tc_sym: fetch_tencent(t))])
+        m[k] = metrics(drop_intraday(series, mkt_of[k])); src[k] = label
+    a_idx = {"A500": ("sh000510", "1.000510", "sh000510"),
+             "CSI500": ("sh000905", "1.000905", "sh000905"),
+             "STAR50": ("sh000688", "1.000688", "sh000688"),
+             "CHINEXT": ("sz399006", "0.399006", "sz399006")}
+    for k, (tc_sym, em_secid, sina_sym) in a_idx.items():
+        print(f"[collect] {k} ...", flush=True)
+        series, label = try_sources(k, [
+            ("腾讯", lambda t=tc_sym: fetch_tencent(t)),
+            ("新浪A股", lambda s=sina_sym: fetch_sina_cn(s)),
+            ("东财", lambda e=em_secid: fetch_eastmoney(e)),
+        ])
+        m[k] = metrics(drop_intraday(series, mkt_of[k])); src[k] = label
+    print("[collect] CONS50 ...", flush=True)
+    series, label = try_sources("CONS50", [
+        ("腾讯", lambda: fetch_tencent("sh931139")),
+        ("东财", lambda: fetch_eastmoney("2.931139")),
+    ])
+    m["CONS50"] = metrics(drop_intraday(series, "A")); src["CONS50"] = label
     need = set(mkt_of)
     missing = need - set(m)
     if missing:
         raise RuntimeError(f"数据缺失: {sorted(missing)}")
+    print(f"[collect] 完成，数据源: {src}", flush=True)
     return m, src
 
 # ---------- 估值与拥挤度（尽力刷新，失败沿用上一期） ----------

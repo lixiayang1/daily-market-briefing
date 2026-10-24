@@ -39,7 +39,7 @@ jobs:
           npm ci --silent
 
       - name: 生成简报并提交 main
-        run: python scripts/daily_briefing.py gen
+        run: python -u scripts/daily_briefing.py gen
 
       - name: 构建站点
         run: npm run build
@@ -65,4 +65,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 验证并推送微信
-        run: python scripts/daily_briefing.py notify
+        run: python -u scripts/daily_briefing.py notify
