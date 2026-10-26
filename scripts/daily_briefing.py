@@ -82,13 +82,19 @@ def fetch_tencent(code, n=600):
 def fetch_eastmoney(secid, years=3):
     beg = (TODAY - timedelta(days=years * 365)).strftime("%Y%m%d")
     last = None
-    for host in ("push2his.eastmoney.com", "push2his1.eastmoney.com",
+    # 编号子域名走不同 CDN 节点：主域名被 WAF 按 IP 封禁时仍可兜底（2026-10-26 实证）
+    for host in ("push2his.eastmoney.com", "92.push2his.eastmoney.com",
+                 "17.push2his.eastmoney.com", "push2his1.eastmoney.com",
                  "push2his2.eastmoney.com", "push2his3.eastmoney.com"):
         try:
-            d = json.loads(http_get(
+            body = http_get(
                 f"https://{host}/api/qt/stock/kline/get?secid={secid}"
                 f"&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=0&beg={beg}&end=20500101"
-                f"&ut=fa5fd1943c7b386f172d6893dbfba10b"))
+                f"&ut=fa5fd1943c7b386f172d6893dbfba10b")
+            try:
+                d = json.loads(body)
+            except Exception as e:
+                raise RuntimeError(f"{type(e).__name__}({e}) body[:80]={body[:80]!r}")
             rows = (d.get("data") or {}).get("klines") or []
             if rows:
                 return [(r.split(",")[0], float(r.split(",")[1])) for r in rows]
@@ -566,12 +572,39 @@ def write_state(m):
                "briefing_date": TODAY_S},
               open(STATE_FILE, "w"), ensure_ascii=False, indent=2)
 
+def expected_dates():
+    """不采集即可推断的「最新可能已有终值」的日期：
+    美股 T 日收盘约北京时间 T+1 05:00 后终值；港/A 股 T 日 16:00 收盘后终值。
+    节假日不处理（state 日期会偏旧，比较结果是不跳过，行为退化为正常采集，安全）。"""
+    def prev_bd(d):
+        d -= timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+        return d
+    now = datetime.now(CST)
+    # 美股 T 日收盘在北京时间 T+1 清晨才终值：取「当前时刻前一天」的最近交易日
+    us_base = TODAY if now.hour >= 5 else TODAY - timedelta(days=1)
+    exp_us = prev_bd(us_base)
+    exp_hka = TODAY if (TODAY.weekday() < 5 and now.hour >= 16) else prev_bd(TODAY)
+    return exp_us.isoformat(), exp_hka.isoformat()
+
 def phase_gen():
     weekly = (TODAY.weekday() == 6)  # 周日：出本周周报（周五收盘数据周六已齐，周日无新数据）
     prev = latest_briefing_date()
     prev_md = ""
     if prev:
         prev_md = open(f"{BRIEF_DIR}/{prev}.md", encoding="utf-8").read()
+    if not weekly and not os.environ.get("FORCE"):
+        # 采集前置短路：周一早上等「最新数据尚未产生」的时段直接静默跳过，
+        # 不再依赖先采集成功（数据源抖动不会再把本该跳过的日子打成失败+异常推送）。
+        exp_us, exp_hka = expected_dates()
+        st = read_state()
+        if (st.get("us", "") >= exp_us and st.get("hk", "") >= exp_hka
+                and st.get("a", "") >= exp_hka):
+            print(f"最新数据尚未产生（预期不早于 us={exp_us} hk/a={exp_hka}，"
+                  f"state={st.get('us')}/{st.get('hk')}/{st.get('a')}），静默跳过")
+            json.dump({"status": "skipped"}, open("/tmp/gen_result.json", "w"))
+            return "skip"
     m = src = None
     last_err = None
     for attempt in range(3):  # 数据源偶发返回非JSON/空数据：整轮采集最多重试3次
