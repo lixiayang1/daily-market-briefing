@@ -664,6 +664,20 @@ def phase_gen():
     git("-c", "user.name=github-actions", "-c", "user.email=actions@github.com",
         "commit", "-m", commit_msg)
     git("push", "origin", "main")
+    # 微信/Server酱服务器在国内，直接嵌 github.io 图片经常被墙或超时导致"图表打不开"。
+    # 改写推送里的图片为 jsdelivr 镜像（按 commit 定址，避免分支缓存拿到旧图）。
+    try:
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                             text=True, check=True).stdout.strip()
+        payload = json.load(open("/tmp/push_payload.json"))
+        gh_img = f"{SITE}/briefings/img/{TODAY_S}-table.png"
+        jsd_img = f"https://cdn.jsdelivr.net/gh/lixiayang1/daily-market-briefing@{sha}/public/briefings/img/{TODAY_S}-table.png"
+        if gh_img in payload["desp"]:
+            payload["desp"] = payload["desp"].replace(gh_img, jsd_img)
+            json.dump(payload, open("/tmp/push_payload.json", "w"), ensure_ascii=False)
+            print(f"推送图片已切换为 jsdelivr 镜像（{sha[:8]}）", flush=True)
+    except Exception as e:
+        print(f"jsdelivr 镜像改写失败（沿用 github.io 原图）: {e!r}", flush=True)
     return "ok"
 
 def phase_notify():
