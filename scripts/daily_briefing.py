@@ -720,6 +720,34 @@ def phase_notify():
                     f"云端任务异常：网站验证未通过（{SITE}）。请检查 GitHub Actions 运行日志。\n\n以上为市场分析，不构成投资建议。")
     print("notify done, site_ok =", ok)
 
+def phase_resend(date_s):
+    """补发指定日期简报的微信推送（图表强制走 jsdelivr 镜像）。
+    用于当天图片链接被微信拦截等情况；重新采集的数据与当日收盘一致。"""
+    md = open(f"{BRIEF_DIR}/{date_s}.md", encoding="utf-8").read()
+    weekly = "周报" in md.splitlines()[0]
+    idx = json.load(open(f"{BRIEF_DIR}/index.json"))
+    prev = next((b["date"] for b in idx["briefings"] if b["date"] < date_s), None)
+    prev_md = open(f"{BRIEF_DIR}/{prev}.md", encoding="utf-8").read() if prev else ""
+    m, _src = collect()
+    v = refresh_valuations(prev_md)
+    desp = build_push(m, v, weekly)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                         text=True, check=True).stdout.strip()
+    old_img = f"{SITE}/briefings/img/{TODAY_S}-table.png"
+    new_img = (f"https://cdn.jsdelivr.net/gh/lixiayang1/daily-market-briefing@{sha}"
+               f"/public/briefings/img/{date_s}-table.png")
+    if old_img in desp:
+        desp = desp.replace(old_img, new_img)
+    if weekly:
+        mon, fri = week_range(m)
+        title = (f"周报 {mon.month}/{mon.day}–{fri.month}/{fri.day}｜重发｜标普 {m['SPX']['chg5']:+.1f}% "
+                 f"恒指 {m['HSI']['chg5']:+.1f}% A500 {m['A500']['chg5']:+.1f}%")
+    else:
+        title = (f"简报 {TODAY.month}月{TODAY.day}日｜重发｜标普 {m['SPX']['day']:+.1f}% "
+                 f"恒指 {m['HSI']['day']:+.1f}% A500 {m['A500']['day']:+.1f}%")
+    server_chan(title, desp)
+    print("resend done:", title, flush=True)
+
 if __name__ == "__main__":
     phase = sys.argv[1] if len(sys.argv) > 1 else "gen"
     try:
@@ -727,6 +755,8 @@ if __name__ == "__main__":
             phase_gen()
         elif phase == "notify":
             phase_notify()
+        elif phase == "resend":
+            phase_resend(sys.argv[2] if len(sys.argv) > 2 else TODAY_S)
     except Exception as e:
         print("FATAL:", repr(e))
         try:

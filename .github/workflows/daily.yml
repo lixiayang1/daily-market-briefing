@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 0 * * *"   # 每天 08:00 Asia/Shanghai（00:00 UTC）
   workflow_dispatch:
+    inputs:
+      resend_date:
+        description: "补发指定日期简报的微信推送（如 2026-11-01），留空则正常运行"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -39,12 +44,15 @@ jobs:
           npm ci --silent
 
       - name: 生成简报并提交 main
+        if: inputs.resend_date == ''
         run: python -u scripts/daily_briefing.py gen
 
       - name: 构建站点
+        if: inputs.resend_date == ''
         run: npm run build
 
       - name: 部署 gh-pages（根目录直放构建产物）
+        if: inputs.resend_date == ''
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
@@ -65,4 +73,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 验证并推送微信
-        run: python -u scripts/daily_briefing.py notify
+        run: |
+          if [ -n "${{ inputs.resend_date }}" ]; then
+            python -u scripts/daily_briefing.py resend "${{ inputs.resend_date }}"
+          else
+            python -u scripts/daily_briefing.py notify
+          fi
