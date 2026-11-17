@@ -664,6 +664,17 @@ def phase_gen():
     git("-c", "user.name=github-actions", "-c", "user.email=actions@github.com",
         "commit", "-m", commit_msg)
     git("push", "origin", "main")
+    # 推送发出前把图片换成国内可达的镜像（GitHub 域名在微信里经常被拦）
+    try:
+        payload = json.load(open("/tmp/push_payload.json"))
+        old_img = f"{SITE}/briefings/img/{TODAY_S}-table.png"
+        new_img = best_img_url(TODAY_S)
+        if old_img in payload["desp"] and new_img != old_img:
+            payload["desp"] = payload["desp"].replace(old_img, new_img)
+            json.dump(payload, open("/tmp/push_payload.json", "w"), ensure_ascii=False)
+            print(f"推送图片使用镜像: {new_img}", flush=True)
+    except Exception as e:
+        print(f"镜像择优失败（沿用原图链接）: {e!r}", flush=True)
     return "ok"
 
 def phase_notify():
@@ -706,6 +717,25 @@ def phase_notify():
                     f"云端任务异常：网站验证未通过（{SITE}）。请检查 GitHub Actions 运行日志。\n\n以上为市场分析，不构成投资建议。")
     print("notify done, site_ok =", ok)
 
+def img_reachable(url, timeout=15):
+    """探测图片 URL 是否返回合法 PNG 头（供挑选微信推送可用的镜像）。"""
+    try:
+        req = urllib.request.Request(url, headers=dict(UA))
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read(8) == b"\x89PNG\r\n\x1a\n"
+    except Exception:
+        return False
+
+def best_img_url(date_s):
+    """GitHub 域名在国内经常被微信拦截，优先走可达的 raw 代理镜像。"""
+    gh = f"{SITE}/briefings/img/{date_s}-table.png"
+    raw = (f"https://raw.githubusercontent.com/lixiayang1/daily-market-briefing"
+           f"/main/public/briefings/img/{date_s}-table.png")
+    for u in (f"https://gh-proxy.com/{raw}", f"https://ghfast.top/{raw}", gh):
+        if img_reachable(u):
+            return u
+    return gh  # 全部不可用时仍给原链
+
 def phase_resend(date_s):
     """补发指定日期简报的微信推送（图表强制走 jsdelivr 镜像）。
     用于当天图片链接被微信拦截等情况；重新采集的数据与当日收盘一致。"""
@@ -717,6 +747,8 @@ def phase_resend(date_s):
     m, _src = collect()
     v = refresh_valuations(prev_md)
     desp = build_push(m, v, weekly)
+    old_img = f"{SITE}/briefings/img/{TODAY_S}-table.png"
+    desp = desp.replace(old_img, best_img_url(date_s))
     if weekly:
         mon, fri = week_range(m)
         title = (f"周报 {mon.month}/{mon.day}–{fri.month}/{fri.day}｜重发｜标普 {m['SPX']['chg5']:+.1f}% "
