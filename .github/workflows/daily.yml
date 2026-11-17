@@ -2,7 +2,10 @@ name: daily-briefing
 
 on:
   schedule:
-    - cron: "0 0 * * *"   # 每天 08:00 Asia/Shanghai（00:00 UTC）
+    - cron: "0 0 * * *"    # 08:00 北京（主）
+    - cron: "0 3 * * *"    # 11:00 北京（兜底）
+    - cron: "0 5 * * *"    # 13:00 北京（兜底）
+    - cron: "30 6 * * *"   # 14:30 北京（兜底；GitHub 高峰期定时任务可能延迟数小时）
   workflow_dispatch:
     inputs:
       resend_date:
@@ -29,30 +32,49 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 检查今日是否已发布（兜底档位的廉价前置检查，避免重复重装依赖）
+        id: published
+        run: |
+          if [ -n "${{ inputs.resend_date }}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          TODAY=$(TZ=Asia/Shanghai date +%F)
+          PUBLISHED=$(curl -s --max-time 20 "https://lixiayang1.github.io/daily-market-briefing/briefings/index.json" | python3 -c "import json,sys; print(json.load(sys.stdin)['briefings'][0]['date'])" 2>/dev/null || true)
+          if [ "$PUBLISHED" = "$TODAY" ]; then
+            echo "今日简报已发布（$TODAY），本次运行跳过"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "今日尚未发布（最新=$PUBLISHED），继续执行"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-python@v5
+        if: steps.published.outputs.skip != 'true'
         with:
           python-version: "3.12"
 
       - uses: actions/setup-node@v4
+        if: steps.published.outputs.skip != 'true'
         with:
           node-version: "20"
 
       - name: 安装依赖与中文字体
+        if: steps.published.outputs.skip != 'true'
         run: |
           pip install --quiet matplotlib
           sudo apt-get install -y -qq fonts-noto-cjk >/dev/null
           npm ci --silent
 
       - name: 生成简报并提交 main
-        if: inputs.resend_date == ''
+        if: steps.published.outputs.skip != 'true' && inputs.resend_date == ''
         run: python -u scripts/daily_briefing.py gen
 
       - name: 构建站点
-        if: inputs.resend_date == ''
+        if: steps.published.outputs.skip != 'true' && inputs.resend_date == ''
         run: npm run build
 
       - name: 部署 gh-pages（根目录直放构建产物）
-        if: inputs.resend_date == ''
+        if: steps.published.outputs.skip != 'true' && inputs.resend_date == ''
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
@@ -73,6 +95,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 验证并推送微信
+        if: steps.published.outputs.skip != 'true'
         run: |
           if [ -n "${{ inputs.resend_date }}" ]; then
             python -u scripts/daily_briefing.py resend "${{ inputs.resend_date }}"
