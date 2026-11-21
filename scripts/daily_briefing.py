@@ -19,6 +19,7 @@ TODAY = datetime.now(CST).date()
 TODAY_S = TODAY.isoformat()
 TITLE_DATE = f"{TODAY.year}年{TODAY.month}月{TODAY.day}日"
 BRIEF_DIR = os.environ.get("BRIEF_DIR", "public/briefings")
+CACHE_FILE = os.path.join(BRIEF_DIR, ".cons50_cache.json")
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
 
 # ---------- 数据抓取 ----------
@@ -207,11 +208,24 @@ def collect():
         ])
         m[k] = metrics(drop_intraday(series, mkt_of[k])); src[k] = label
     print("[collect] CONS50 ...", flush=True)
-    series, label = try_sources("CONS50", [
-        ("腾讯", lambda: fetch_tencent("sh931139")),
-        ("东财", lambda: fetch_eastmoney("2.931139")),
-    ])
-    m["CONS50"] = metrics(drop_intraday(series, "A")); src["CONS50"] = label
+    try:
+        series, label = try_sources("CONS50", [
+            ("腾讯", lambda: fetch_tencent("sh931139")),
+            ("东财", lambda: fetch_eastmoney("2.931139")),
+        ])
+        series = drop_intraday(series, "A")
+        # 缓存最近收盘序列：数据源被反爬整体拦截时，可沿用上一期数据兜底出简报
+        json.dump(series[-300:], open(CACHE_FILE, "w"), ensure_ascii=False)
+        m["CONS50"] = metrics(series); src["CONS50"] = label
+    except Exception as e:
+        print(f"  CONS50 全部数据源失败，尝试缓存兜底: {e!r}", flush=True)
+        try:
+            m["CONS50"] = metrics(json.load(open(CACHE_FILE)))
+            m["CONS50"]["stale"] = True
+            src["CONS50"] = "缓存"
+            print(f"  CONS50 沿用缓存至 {m['CONS50']['date']}", flush=True)
+        except Exception:
+            raise RuntimeError(f"CONS50 无缓存可用: {e!r}")
     need = set(mkt_of)
     missing = need - set(m)
     if missing:
@@ -375,6 +389,8 @@ def build_md(m, v, src, prev_md, weekly=False):
              "|---|---|---|---|---|---|"]
     for key, name, mkt, rel_label, val, crowd in INDEX_ROWS:
         mt = m[key]
+        if mt.get("stale"):
+            name = f"{name}（数据沿用至{int(mt['date'][5:7])}月{int(mt['date'][8:10])}日）"
         rel_name = {"美": "S&P", "港": "恒指", "A": "A500"}[mkt]
         rel = rel_label or f"较{rel_name} {mt[ck]-m[base_of(mkt)][ck]:+.2f}pct"
         lines.append(f"| {name} | {pct(mt[ck])} | {rel} | {val} | {crowd} | {yearline(mt)} |")
