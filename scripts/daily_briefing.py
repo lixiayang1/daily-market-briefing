@@ -607,6 +607,14 @@ def expected_dates():
 def phase_gen():
     weekly = (TODAY.weekday() == 6)  # 周日：出本周周报（周五收盘数据周六已齐，周日无新数据）
     prev = latest_briefing_date()
+    now = datetime.now(CST)
+    # 发布窗口（北京 07:30–09:45）：GitHub 定时档位常被推迟到深夜，深夜运行时美股
+    # 尚未收盘、A股数据也是前一天的，绝不允许在窗口外发布；本地触发器负责在窗口内触发。
+    in_window = ((7, 30) <= (now.hour, now.minute) < (9, 45)) or os.environ.get("FORCE")
+    if not in_window:
+        print(f"当前 {now.strftime('%H:%M')} 不在发布窗口（07:30–09:45），静默跳过", flush=True)
+        json.dump({"status": "skipped"}, open("/tmp/gen_result.json", "w"))
+        return "skip"
     prev_md = ""
     if prev:
         prev_md = open(f"{BRIEF_DIR}/{prev}.md", encoding="utf-8").read()
